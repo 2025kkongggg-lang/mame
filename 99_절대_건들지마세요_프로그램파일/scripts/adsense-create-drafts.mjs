@@ -81,6 +81,14 @@ function appendExternalSources(html, sources) {
   return `${html.trim()}\n\n<!-- wp:heading {"level":2} -->\n<h2 class="wp-block-heading">참고 자료</h2>\n<!-- /wp:heading -->\n\n<!-- wp:list -->\n<ul class="wp-block-list">${items}</ul>\n<!-- /wp:list -->`;
 }
 
+function normalizeExternalSources(sources) {
+  if (!Array.isArray(sources)) return [];
+  return sources
+    .map((source) => normalizeSpaces(source))
+    .filter((source) => source && source.length <= 500 && !/https?:\/\/|\[[^\]]+\]\([^)]+\)/i.test(source))
+    .slice(0, 3);
+}
+
 function stripTags(value) {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -747,6 +755,7 @@ function ensureMetaDefaults(meta, title) {
   const featuredImageCaption = normalizeSpaces(meta?.featuredImageCaption || `${focusKeyword}의 핵심 내용을 시각적으로 정리한 이미지입니다.`).slice(0, 140);
   // 이미지 장면은 영어만 받는다. 한글이 섞이면 모델이 글자로 그리므로(2026-09-21 진현님: 이미지에 어떤 언어 글자도 금지) 한글이 있으면 버린다.
   const imageScene = /[\u3131-\uD79D]/.test(String(meta?.imageScene || "")) ? "" : normalizeSpaces(meta?.imageScene || "").slice(0, 400);
+  const externalSources = normalizeExternalSources(meta?.externalSources);
 
   return {
     slug,
@@ -756,6 +765,7 @@ function ensureMetaDefaults(meta, title) {
     featuredImageAlt,
     featuredImageCaption,
     imageScene,
+    externalSources,
   };
 }
 
@@ -1103,7 +1113,7 @@ async function fetchWordPressCategories({siteUrl, username, appPassword}) {
   return collected;
 }
 
-async function generatePostMeta({apiKey, model, title, 고정키워드 = ""}) {
+async function generatePostMeta({apiKey, model, title, 고정키워드 = "", 외부출처자동 = false}) {
   const systemPrompt = [
     "너는 한국어 글 제목을 보고 워드프레스 발행 메타를 만드는 편집자다.",
     "반드시 JSON 객체만 출력한다. 설명, 코드블록, 마크다운은 출력하지 않는다.",
@@ -1112,6 +1122,7 @@ async function generatePostMeta({apiKey, model, title, 고정키워드 = ""}) {
     "focusKeyword는 제목에서 가장 중요한 한국어 대표키워드 1개 또는 짧은 키워드구여야 한다.",
     "categoryHint는 글을 넣을 워드프레스 카테고리를 고르기 위한 한국어 주제 힌트여야 한다.",
     "imageScene은 대표이미지로 그릴 장면을 영어로 1~2문장 묘사한 것이어야 한다. 사물·상황·분위기만 쓰고, 글자·간판·문서·화면·책 등 읽을 수 있는 텍스트가 나올 만한 장면은 피한다. 사람 얼굴은 넣지 않는다.",
+    외부출처자동 ? "externalSources에는 이 글 주제와 직접 관련된 신뢰할 수 있는 출처 2~3개를 넣는다. 실재 여부가 확실한 기관·표준·공식 보고서·학술 출판물만 쓰고, 출처명·제목·연도는 모르면 추측하거나 만들어 내지 않는다. URL과 링크는 절대 넣지 않는다." : "",
   ].join("\n");
 
   const userPrompt = [
@@ -1125,6 +1136,7 @@ async function generatePostMeta({apiKey, model, title, 고정키워드 = ""}) {
     '  "categoryHint": "카테고리 선택용 한국어 주제 힌트",',
     '  "featuredImageAlt": "대표키워드를 자연스럽게 1회 포함한 대표이미지 대체 텍스트 한국어 1문장",',
     '  "featuredImageCaption": "대표이미지 캡션 한국어 1문장",',
+    ...(외부출처자동 ? ['  "externalSources": ["기관명. *자료 제목*, 연도."] ,'] : []),
     '  "imageScene": "English description of a text-free scene for the featured image, 1-2 sentences"',
     "}",
   ].join("\n");
@@ -1699,6 +1711,7 @@ const hourGap = Math.max(0, Number(argValue("hour-gap", "0")) || 0);
 const dateOffset = Math.max(0, Number(argValue("date-offset", "0")) || 0);
 const startDate = parseDate(argValue("start-date", "")) || defaultStartDate(dateMode);
 const externalSources = decodeExternalSources(argValue("external-sources", ""));
+const autoExternalSources = ["1", "true", "yes"].includes(argValue("auto-external-sources", "0").toLowerCase());
 const usdKrw = Number(env.ARTICLE_USD_KRW || DEFAULT_USD_KRW);
 
 if (!dryRun && !ready(env.OPENAI_API_KEY, ["sk-your"])) {
@@ -1817,6 +1830,7 @@ const 지정포커스키워드 = argValue("focus-keyword", "");
 const 대주제 = 지정포커스키워드 || 대주제키워드(allTitleEntries.map((e) => e.title));
 if (대주제) console.log(`포커스 키워드(대주제): ${대주제}`);
 if (externalSources.length) console.log(`외부 출처 ${externalSources.length}개를 글 맨 아래에 넣습니다.`);
+if (autoExternalSources) console.log("글 주제에 맞는 외부 출처를 글마다 만들어 글 맨 아래에 넣습니다.");
 const results = [];
 for (let index = 0; index < titles.length; index += 1) {
   const titleEntry = titleEntries[index];
@@ -1836,7 +1850,7 @@ for (let index = 0; index < titles.length; index += 1) {
     let metaUsage = {inputTokens: 0, outputTokens: 0, totalTokens: 0};
     try {
       const 이글키워드 = 지정포커스키워드 || (대주제 && normalizeSpaces(title).includes(대주제) ? 대주제 : "");
-      const generatedMeta = await generatePostMeta({apiKey: env.OPENAI_API_KEY, model, title, 고정키워드: 이글키워드});
+      const generatedMeta = await generatePostMeta({apiKey: env.OPENAI_API_KEY, model, title, 고정키워드: 이글키워드, 외부출처자동: autoExternalSources});
       meta = generatedMeta.meta;
       if (이글키워드) meta = {...meta, focusKeyword: 이글키워드};
       metaUsage = generatedMeta.usage;
@@ -1899,7 +1913,9 @@ for (let index = 0; index < titles.length; index += 1) {
     const generatedImage = await generateFeaturedImage({apiKey: env.OPENAI_API_KEY, title, meta, usdKrw});
     단계(index + 1, titles.length, "워드프레스에 올리는 중");
     const featuredMedia = await uploadFeaturedImage({siteUrl, username, appPassword, title, meta, generatedImage});
-    const htmlWithImage = insertImageBlockIntoArticle(appendExternalSources(html, externalSources), buildArticleImageBlock({media: featuredMedia}));
+    const 글외부출처 = externalSources.length ? externalSources : (autoExternalSources ? meta.externalSources : []);
+    if (autoExternalSources && !글외부출처.length) throw new Error("글에 맞는 외부 출처를 만들지 못했습니다.");
+    const htmlWithImage = insertImageBlockIntoArticle(appendExternalSources(html, 글외부출처), buildArticleImageBlock({media: featuredMedia}));
     validateArticleHtml(htmlWithImage, title);
     validateInlineImageBlock(htmlWithImage, featuredMedia);
     const localPath = join(outputDir, `${String(index + 1).padStart(3, "0")}_${safeFilename(title)}.html`);
@@ -1942,6 +1958,7 @@ for (let index = 0; index < titles.length; index += 1) {
       status: "draft",
       slug: post.slug || meta.slug,
       focusKeyword: meta.focusKeyword,
+      externalSources: 글외부출처,
       featuredImageAlt: meta.featuredImageAlt,
       featuredMediaId: featuredMedia.id,
       featuredImageUrl: featuredMedia.sourceUrl,

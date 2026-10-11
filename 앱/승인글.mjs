@@ -470,7 +470,8 @@ async function 글만들기본체({작업폴더, 사이트 = 1, 개수 = 1, 날�
   if (지정날짜) argv.push(`--start-date=${지정날짜}`);
   if (간격일 > 0) argv.push(`--date-step=${간격일}`);
   if (포커스키워드) argv.push(`--focus-keyword=${포커스키워드}`);
-  if (외부출처) argv.push(`--external-sources=${Buffer.from(String(외부출처), "utf8").toString("base64url")}`);
+  if (외부출처 === "자동") argv.push("--auto-external-sources=1");
+  else if (외부출처) argv.push(`--external-sources=${Buffer.from(String(외부출처), "utf8").toString("base64url")}`);
   if (무작위일수) argv.push(`--random-days=${무작위일수}`);
   if (시간간격) argv.push(`--hour-gap=${시간간격}`);
   if (지정날짜모드 && 지정날짜모드 !== "now" && 지정날짜모드 !== "spread" && 지정날짜모드 !== "fixed" && 지정날짜모드 !== "fixed-step") argv.push(`--date-offset=${앞상태.만든수}`); // 글 1개씩 불러도 날짜 순번이 이어지게
