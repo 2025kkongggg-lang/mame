@@ -52,6 +52,35 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function decodeExternalSources(value) {
+  if (!value) return [];
+  let raw;
+  try {
+    raw = Buffer.from(String(value), "base64url").toString("utf8");
+  } catch {
+    throw new Error("외부 출처를 읽을 수 없습니다.");
+  }
+  if (/https?:\/\/|\[[^\]]+\]\([^)]+\)/i.test(raw)) throw new Error("외부 출처에는 링크를 넣을 수 없습니다.");
+  const sources = raw.split(/\r?\n/)
+    .map((line) => line.trim().replace(/^-\s+/, ""))
+    .filter((line) => line && !/^>?\s*\*{0,2}참고 자료\*{0,2}\s*$/i.test(line));
+  if (!sources.length) throw new Error("외부 출처는 한 줄 이상 필요합니다.");
+  if (sources.length > 20 || sources.some((source) => source.length > 500)) throw new Error("외부 출처가 너무 깁니다.");
+  return sources;
+}
+
+function referenceHtml(value) {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+function appendExternalSources(html, sources) {
+  if (!sources.length) return html;
+  const items = sources.map((source) => `<li>${referenceHtml(source)}</li>`).join("");
+  return `${html.trim()}\n\n<!-- wp:heading {"level":2} -->\n<h2 class="wp-block-heading">참고 자료</h2>\n<!-- /wp:heading -->\n\n<!-- wp:list -->\n<ul class="wp-block-list">${items}</ul>\n<!-- /wp:list -->`;
+}
+
 function stripTags(value) {
   return String(value)
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -501,6 +530,7 @@ function postDateForIndex(index, mode, startDate, {randomDays = 30, fixedTime = 
   if (mode === "now" || mode === "none") return null;
   // 기본값: 하루 3개, 최소 3시간 간격, 시각 무작위, 이미 잡힌 시각은 피함
   if (mode === "spread") return spreadDate(index, {perDay, minGapHours, startDate: startDate && startDate.getTime() > Date.now() ? startDate : null, 피할시각들});
+  if (mode === "fixed") return applyTimeOfDay(new Date(startDate.getTime()), fixedTime).toISOString();
 
   // 시간 간격 모드 — 글마다 N시간씩 미룬다.
   //
@@ -1609,6 +1639,20 @@ async function updateDraftPostContent({siteUrl, username, appPassword, postId, h
   return data;
 }
 
+async function updateDraftPostDate({siteUrl, username, appPassword, postId, date}) {
+  const credentials = wordpressCredentials(username, appPassword);
+  const response = await wpFetch(`${wordpressBaseUrl(siteUrl)}/wp-json/wp/v2/posts/${postId}?context=edit`, {
+    method: "POST",
+    headers: {Authorization: `Basic ${credentials}`, "Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify({date}),
+  });
+  const body = await response.text();
+  let data;
+  try { data = JSON.parse(body); } catch { throw new Error(`워드프레스 날짜 응답을 해석하지 못함: ${body.slice(0, 200)}`); }
+  if (!response.ok) throw new Error(`워드프레스 발행일 지정 실패: ${data.message || body.slice(0, 300)}`);
+  return data;
+}
+
 // 라이센스 게이트(수강 코드 확인) 통과 후, process.env 우선 + .env.local 보조로 설정을 읽는다 (PRD D8·D9)
 const env = requireLicense({scriptLabel: "애드센스 승인글 만들기"});
 const site = Number(argValue("site", "1"));
@@ -1649,6 +1693,7 @@ const hourGap = Math.max(0, Number(argValue("hour-gap", "0")) || 0);
 // 그래서 지금까지 만든 개수를 --date-offset 으로 받아 날짜 순번을 이어 간다. 코드스페이스 판은 0.
 const dateOffset = Math.max(0, Number(argValue("date-offset", "0")) || 0);
 const startDate = parseDate(argValue("start-date", "")) || defaultStartDate(dateMode);
+const externalSources = decodeExternalSources(argValue("external-sources", ""));
 const usdKrw = Number(env.ARTICLE_USD_KRW || DEFAULT_USD_KRW);
 
 if (!dryRun && !ready(env.OPENAI_API_KEY, ["sk-your"])) {
@@ -1763,8 +1808,10 @@ const 이번실행 = {글수: 0, krw: 0, usd: 0, total_tokens: 0};
 
 const 잡힌시각들 = Array.isArray(existingOnWordPress.dates) ? [...existingOnWordPress.dates] : [];
 // 랭크매스 포커스 키워드 = 제목 파일의 대주제 (제목 대부분에 공통으로 든 문구). 없으면 글마다 OpenAI 가 고른 키워드를 쓴다.
-const 대주제 = argValue("focus-keyword", "") || 대주제키워드(allTitleEntries.map((e) => e.title));
+const 지정포커스키워드 = argValue("focus-keyword", "");
+const 대주제 = 지정포커스키워드 || 대주제키워드(allTitleEntries.map((e) => e.title));
 if (대주제) console.log(`포커스 키워드(대주제): ${대주제}`);
+if (externalSources.length) console.log(`외부 출처 ${externalSources.length}개를 글 맨 아래에 넣습니다.`);
 const results = [];
 for (let index = 0; index < titles.length; index += 1) {
   const titleEntry = titleEntries[index];
@@ -1783,7 +1830,7 @@ for (let index = 0; index < titles.length; index += 1) {
     let meta = fallbackPostMeta(title);
     let metaUsage = {inputTokens: 0, outputTokens: 0, totalTokens: 0};
     try {
-      const 이글키워드 = 대주제 && normalizeSpaces(title).includes(대주제) ? 대주제 : "";
+      const 이글키워드 = 지정포커스키워드 || (대주제 && normalizeSpaces(title).includes(대주제) ? 대주제 : "");
       const generatedMeta = await generatePostMeta({apiKey: env.OPENAI_API_KEY, model, title, 고정키워드: 이글키워드});
       meta = generatedMeta.meta;
       if (이글키워드) meta = {...meta, focusKeyword: 이글키워드};
@@ -1847,7 +1894,7 @@ for (let index = 0; index < titles.length; index += 1) {
     const generatedImage = await generateFeaturedImage({apiKey: env.OPENAI_API_KEY, title, meta, usdKrw});
     단계(index + 1, titles.length, "워드프레스에 올리는 중");
     const featuredMedia = await uploadFeaturedImage({siteUrl, username, appPassword, title, meta, generatedImage});
-    const htmlWithImage = insertImageBlockIntoArticle(html, buildArticleImageBlock({media: featuredMedia}));
+    const htmlWithImage = insertImageBlockIntoArticle(appendExternalSources(html, externalSources), buildArticleImageBlock({media: featuredMedia}));
     validateArticleHtml(htmlWithImage, title);
     validateInlineImageBlock(htmlWithImage, featuredMedia);
     const localPath = join(outputDir, `${String(index + 1).padStart(3, "0")}_${safeFilename(title)}.html`);
@@ -1863,6 +1910,12 @@ for (let index = 0; index < titles.length; index += 1) {
     }
     if (!postHasInlineImage(post, featuredMedia)) {
       throw new Error("워드프레스 임시글 본문에 이미지 블록이 저장되지 않았습니다.");
+    }
+    if (dateMode === "fixed" && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
+      post = await updateDraftPostDate({siteUrl, username, appPassword, postId: post.id, date: postDate});
+    }
+    if (dateMode === "fixed" && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
+      throw new Error("워드프레스가 지정한 발행일을 저장하지 않았습니다.");
     }
 
     // 랭크매스 포커스 키워드. 없는 사이트면 조용히 건너뛰되, 화면에는 왜 안 됐는지 남긴다.
