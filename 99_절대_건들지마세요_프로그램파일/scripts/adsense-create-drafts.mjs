@@ -1711,7 +1711,7 @@ const hourGap = Math.max(0, Number(argValue("hour-gap", "0")) || 0);
 const dateOffset = Math.max(0, Number(argValue("date-offset", "0")) || 0);
 const startDate = parseDate(argValue("start-date", "")) || defaultStartDate(dateMode);
 const externalSources = decodeExternalSources(argValue("external-sources", ""));
-const autoExternalSources = ["1", "true", "yes"].includes(argValue("auto-external-sources", "0").toLowerCase());
+const autoExternalSources = ["1", "true", "yes"].includes(argValue("auto-external-sources", "1").toLowerCase());
 const usdKrw = Number(env.ARTICLE_USD_KRW || DEFAULT_USD_KRW);
 
 if (!dryRun && !ready(env.OPENAI_API_KEY, ["sk-your"])) {
