@@ -531,6 +531,11 @@ function postDateForIndex(index, mode, startDate, {randomDays = 30, fixedTime = 
   // 기본값: 하루 3개, 최소 3시간 간격, 시각 무작위, 이미 잡힌 시각은 피함
   if (mode === "spread") return spreadDate(index, {perDay, minGapHours, startDate: startDate && startDate.getTime() > Date.now() ? startDate : null, 피할시각들});
   if (mode === "fixed") return applyTimeOfDay(new Date(startDate.getTime()), fixedTime).toISOString();
+  if (mode === "fixed-step") {
+    const date = new Date(startDate.getTime());
+    date.setUTCDate(date.getUTCDate() + index * stepDays);
+    return applyTimeOfDay(date, fixedTime).toISOString();
+  }
 
   // 시간 간격 모드 — 글마다 N시간씩 미룬다.
   //
@@ -1911,10 +1916,10 @@ for (let index = 0; index < titles.length; index += 1) {
     if (!postHasInlineImage(post, featuredMedia)) {
       throw new Error("워드프레스 임시글 본문에 이미지 블록이 저장되지 않았습니다.");
     }
-    if (dateMode === "fixed" && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
+    if (["fixed", "fixed-step"].includes(dateMode) && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
       post = await updateDraftPostDate({siteUrl, username, appPassword, postId: post.id, date: postDate});
     }
-    if (dateMode === "fixed" && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
+    if (["fixed", "fixed-step"].includes(dateMode) && postDate && String(post.date || "").slice(0, 10) !== postDate.slice(0, 10)) {
       throw new Error("워드프레스가 지정한 발행일을 저장하지 않았습니다.");
     }
 

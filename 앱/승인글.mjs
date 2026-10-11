@@ -449,7 +449,7 @@ export async function 글만들기(옵션 = {}) {
   return 잠금으로({작업폴더: 옵션.작업폴더, 이름: `승인글-사이트${Number(옵션.사이트) || 1}`, 일: () => 글만들기본체(옵션)});
 }
 
-async function 글만들기본체({작업폴더, 사이트 = 1, 개수 = 1, 날짜모드 = "", 시작날짜 = "", 발행일 = "", 포커스키워드 = "", 외부출처 = "", 무작위일수 = 0, 시간간격 = 0, 하루개수 = 0, 최소간격시간 = 0}) {
+async function 글만들기본체({작업폴더, 사이트 = 1, 개수 = 1, 날짜모드 = "", 시작날짜 = "", 발행일 = "", 발행간격일 = 0, 포커스키워드 = "", 외부출처 = "", 무작위일수 = 0, 시간간격 = 0, 하루개수 = 0, 최소간격시간 = 0}) {
   const 설정 = await 설정읽기(작업폴더);
   const 빠진 = [];
   if (!설정.수강코드) 빠진.push("수강 코드");
@@ -461,17 +461,19 @@ async function 글만들기본체({작업폴더, 사이트 = 1, 개수 = 1, 날�
 
   if (발행일 && !/^\d{4}-\d{2}-\d{2}$/.test(발행일)) throw new Error("발행일은 YYYY-MM-DD 형식이어야 합니다.");
   const argv = [`--site=${사이트}`, `--limit=${개수}`];
+  const 간격일 = Math.max(0, Number(발행간격일) || 0);
   const 지정날짜 = 발행일 || 시작날짜;
-  const 지정날짜모드 = 발행일 ? "fixed" : 날짜모드;
+  const 지정날짜모드 = 발행일 ? (간격일 > 0 ? "fixed-step" : "fixed") : 날짜모드;
   if (지정날짜모드) argv.push(`--date-mode=${지정날짜모드}`);
   if (하루개수) argv.push(`--per-day=${하루개수}`);
   if (최소간격시간) argv.push(`--min-gap-hours=${최소간격시간}`);
   if (지정날짜) argv.push(`--start-date=${지정날짜}`);
+  if (간격일 > 0) argv.push(`--date-step=${간격일}`);
   if (포커스키워드) argv.push(`--focus-keyword=${포커스키워드}`);
   if (외부출처) argv.push(`--external-sources=${Buffer.from(String(외부출처), "utf8").toString("base64url")}`);
   if (무작위일수) argv.push(`--random-days=${무작위일수}`);
   if (시간간격) argv.push(`--hour-gap=${시간간격}`);
-  if (지정날짜모드 && 지정날짜모드 !== "now" && 지정날짜모드 !== "spread" && 지정날짜모드 !== "fixed") argv.push(`--date-offset=${앞상태.만든수}`); // 글 1개씩 불러도 날짜 순번이 이어지게
+  if (지정날짜모드 && 지정날짜모드 !== "now" && 지정날짜모드 !== "spread" && 지정날짜모드 !== "fixed" && 지정날짜모드 !== "fixed-step") argv.push(`--date-offset=${앞상태.만든수}`); // 글 1개씩 불러도 날짜 순번이 이어지게
   if (!지정날짜모드 || 지정날짜모드 === "spread") {
     // 기본(spread): 오늘 이 사이트에서 이미 만든 글 수만큼 슬롯을 건너뛴다 — 1개씩 불러도 하루 3개·최소 3시간 간격이 유지된다
     let 오늘만든 = 0;
